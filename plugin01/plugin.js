@@ -10,7 +10,9 @@
                 case 1:  return argsArr.reduce(function(p, c) {return p + c;});
                 case 2:  return argsArr.reduce(function(p, c) {return p - c;});
                 case 3:  return argsArr.reduce(function(p, c) {return p * c;});
-                case 4:  return argsArr.reduce(function(p, c) {return p / c;});
+                case 4:  return argsArr.reduce(fu
+
+                  -nction(p, c) {return p / c;});
                 case 5:  return argsArr.reduce(function(p, c) {return p % c;});
                 default: return 0;
           }
