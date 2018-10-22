@@ -365,7 +365,569 @@ Js中，万物皆对象，所有对象都是继承自原型。JS在创建对象�
 利用原型链，可以将一些UI层面的业务代码封装在一个小组件，并利用js实现组件的交互性
 
 
+需求：
+1. 实现一个弹层，此弹层可以显示一些文字提示性的信息；
+2. 弹层右上角必须有一个关闭按扭，点击之后弹层消失；
+3. 弹层底部必有一个“确定”按扭，然后根据需求，可以配置多一个“取消”按扭；
+4. 点击“确定”按扭之后，可以触发一个事件；
+5. 点击关闭/“取消”按扭后，可以触发一个事件。
 
+**html 代码**
+``` html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>index</title>
+    <link rel="stylesheet" type="text/css" href="index.css">
+</head>
+<body>
+    <div class="mydialog">
+        <span class="close">×</span>
+        <div class="mydialog-cont">
+            <div class="cont">hello world!</div>
+        </div>
+        <div class="footer">
+            <span class="btn">确定</span>
+            <span class="btn">取消</span>
+        </div>
+    </div>
+    <script src="index.js"></script>
+</body>
+</html>
+```
+
+**css**
+```css
+* {
+    padding: 0;
+    margin: 0;
+}
+
+.mydialog {
+    background: #fff;
+    box-shadow: 0 1px 10px 0 rgba(0, 0, 0, 0.3);
+    overflow: hidden;
+    width: 300px;
+    height: 180px;
+    border: 1px solid #dcdcdc;
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    margin: auto;
+}
+
+.close {
+    position: absolute;
+    right: 5px;
+    top: 5px;
+    width: 16px;
+    height: 16px;
+    line-height: 16px;
+    text-align: center;
+    font-size: 18px;
+    cursor: pointer;
+}
+
+.mydialog-cont {
+    padding: 0 0 50px;
+    display: table;
+    width: 100%;
+    height: 100%;
+}
+
+.mydialog-cont .cont {
+    display: table-cell;
+    text-align: center;
+    vertical-align: middle;
+    width: 100%;
+    height: 100%;
+}
+
+.footer {
+    display: table;
+    table-layout: fixed;
+    width: 100%;
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    border-top: 1px solid #dcdcdc;
+}
+
+.footer .btn {
+    display: table-cell;
+    width: 50%;
+    height: 50px;
+    line-height: 50px;
+    text-align: center;
+    cursor: pointer;
+}
+
+.footer .btn:last-child {
+    display: table-cell;
+    width: 50%;
+    height: 50px;
+    line-height: 50px;
+    text-align: center;
+    cursor: pointer;
+    border-left: 1px solid #dcdcdc;
+}
+```
+插件
+``` javascript
+    function MyDialog() {} // 组件对象
+    MyDialog.prototype = {
+        constructor: this,
+        _initial: function() {},
+        _parseTpl: function() {},
+        _parseToDom:function(){},
+        show:function(){},
+        hide:function(){},
+        css:function(){},
+        ...
+   }
+
+```
+然后就可以将插件的功能都写上，不过中间的业务逻辑，需要自己一步一步研究。
+1. 对象合并函数
+```javascript
+// 对象合并
+function extend(o, n, override) {
+    for(var key in n) {
+        if(n,hasOwnProperty(key) && (!o.hasOwnProperty(key) || override)) {
+              o[key] = n[key];
+       }
+    }
+    return o;
+}
+```
+2. 自定义模版引擎解释函数
+``` javascript 
+function templateEngine(html, data) {
+    var re = /<%([^%>]+)?%>/g,
+        reExp = /(^( )?(if|for|else|switch|case|break|{|}))(.*)?/g,
+        code = 'var r=[];\n',
+        cursor = 0;
+    var match;
+    var add = function(line, js) {
+        js ? (code += line.match(reExp) ? line + '\n' : 'r.push(' + line + ');\n') :
+            (code += line != '' ? 'r.push("' + line.replace(/"/g, '\\"') + '");\n' : '');
+        return add;
+    }
+    while (match = re.exec(html)) {
+        add(html.slice(cursor, match.index))(match[1], true);
+        cursor = match.index + match[0].length;
+    }
+    add(html.substr(cursor, html.length - cursor));
+    code += 'return r.join("");';
+    return new Function(code.replace(/[\r\t\n]/g, '')).apply(data);
+}
+```
+3. 查找class获取dom函数
+``` javascript
+// 通过class查找dom
+if(!('getElementsByClass' in HTMLElement)){
+    HTMLElement.prototype.getElementsByClass = function(n, tar){
+        var el = [],
+            _el = (!!tar ? tar : this).getElementsByTagName('*');
+        for (var i=0; i<_el.length; i++ ) {
+            if (!!_el[i].className && (typeof _el[i].className == 'string') && _el[i].className.indexOf(n) > -1 ) {
+                el[el.length] = _el[i];
+            }
+        }
+        return el;
+    };
+    ((typeof HTMLDocument !== 'undefined') ? HTMLDocument : Document).prototype.getElementsByClass = HTMLElement.prototype.getElementsByClass;
+}
+```
+
+结合工具函数，再去实现每一个钩子函数具体逻辑结构：
+```
+// plugin.js
+;(function(undefined) {
+    "use strict"
+    var _global;
+
+    ...
+
+    // 插件构造函数 - 返回数组结构
+    function MyDialog(opt){
+        this._initial(opt);
+    }
+    MyDialog.prototype = {
+        constructor: this,
+        _initial: function(opt) {
+            // 默认参数
+            var def = {
+                ok: true,
+                ok_txt: '确定',
+                cancel: false,
+                cancel_txt: '取消',
+                confirm: function(){},
+                close: function(){},
+                content: '',
+                tmpId: null
+            };
+            this.def = extend(def,opt,true);
+            this.tpl = this._parseTpl(this.def.tmpId);
+            this.dom = this._parseToDom(this.tpl)[0];
+            this.hasDom = false;
+        },
+        _parseTpl: function(tmpId) { // 将模板转为字符串
+            var data = this.def;
+            var tplStr = document.getElementById(tmpId).innerHTML.trim();
+            return templateEngine(tplStr,data);
+        },
+        _parseToDom: function(str) { // 将字符串转为dom
+            var div = document.createElement('div');
+            if(typeof str == 'string') {
+                div.innerHTML = str;
+            }
+            return div.childNodes;
+        },
+        show: function(callback){
+            var _this = this;
+            if(this.hasDom) return ;
+            document.body.appendChild(this.dom);
+            this.hasDom = true;
+            document.getElementsByClass('close',this.dom)[0].onclick = function(){
+                _this.hide();
+            };
+            document.getElementsByClass('btn-ok',this.dom)[0].onclick = function(){
+                _this.hide();
+            };
+            if(this.def.cancel){
+                document.getElementsByClass('btn-cancel',this.dom)[0].onclick = function(){
+                    _this.hide();
+                };
+            }
+            callback && callback();
+            return this;
+        },
+        hide: function(callback){
+            document.body.removeChild(this.dom);
+            this.hasDom = false;
+            callback && callback();
+            return this;
+        },
+        modifyTpl: function(template){
+            if(!!template) {
+                if(typeof template == 'string'){
+                    this.tpl = template;
+                } else if(typeof template == 'function'){
+                    this.tpl = template();
+                } else {
+                    return this;
+                }
+            }
+            // this.tpl = this._parseTpl(this.def.tmpId);
+            this.dom = this._parseToDom(this.tpl)[0];
+            return this;
+        },
+        css: function(styleObj){
+            for(var prop in styleObj){
+                var attr = prop.replace(/[A-Z]/g,function(word){
+                    return '-' + word.toLowerCase();
+                });
+                this.dom.style[attr] = styleObj[prop];
+            }
+            return this;
+        },
+        width: function(val){
+            this.dom.style.width = val + 'px';
+            return this;
+        },
+        height: function(val){
+            this.dom.style.height = val + 'px';
+            return this;
+        }
+    }
+
+    _global = (function(){ return this || (0, eval)('this'); }());
+    if (typeof module !== "undefined" && module.exports) {
+        module.exports = MyDialog;
+    } else if (typeof define === "function" && define.amd) {
+        define(function(){return MyDialog;});
+    } else {
+        !('MyDialog' in _global) && (_global.MyDialog = MyDialog);
+    }
+}());
+```
+
+到这一步，我们的插件已经达到了基础需求了。我们可以在页面这样调用：
+``` 
+<script type="text/template" id="dialogTpl">
+    <div class="mydialog">
+        <span class="close">×</span>
+        <div class="mydialog-cont">
+            <div class="cont"><% this.content %></div>
+        </div>
+        <div class="footer">
+            <% if(this.cancel){ %>
+            <span class="btn btn-ok"><% this.ok_txt %></span>
+            <span class="btn btn-cancel"><% this.cancel_txt %></span>
+            <% } else{ %>
+            <span class="btn btn-ok" style="width: 100%"><% this.ok_txt %></span>
+            <% } %>
+        </div>
+    </div>
+</script>
+<script src="index.js"></script>
+<script>
+    var mydialog = new MyDialog({
+        tmpId: 'dialogTpl',
+        cancel: true,
+        content: 'hello world!'
+    });
+    mydialog.show();
+</script>
+```
+
+#### 插件的监听
+弹出框插件我们已经实现了基本的显示与隐藏的功能。不过我们在怎么时候弹出，弹出之后可能进行一些操作，实际上还是需要进行一些可控的操作。就好像我们进行事件绑定一样，只有用户点击了按扭，才响应具体的事件。那么，我们的插件，应该也要像事件绑定一样，只有执行了某些操作的时候，调用相应的事件响应。
+这种js的设计模式，被称为 **订阅/发布模式**，也被叫做**观察者模式**。我们插件中的也需要用到观察者模式，比如，在打开弹窗之前，我们需要先进行弹窗的内容更新，执行一些判断逻辑等，然后执行完成之后才显示出弹窗。在关闭弹窗之后，我们需要执行关闭之后的一些逻辑，处理业务等。这时候我们需要像平时绑定事件一样，给插件做一些“事件”绑定回调方法。
+我们jquery对dom的事件响应是这样的：
+`$(<dom>).on("click",function(){})`
+
+我们照上面的方式设计了对应的插件响应式这样的：
+`mydialog.on('show',function(){}) `
+
+我们需要实现一个事件机制，以到达监听的事件效果。关于自定义事件监听。参考[漫谈js自定义事件、DOM/伪DOM自定义事件](https://www.zhangxinxu.com/wordpress/2012/04/js-dom%E8%87%AA%E5%AE%9A%E4%B9%89%E4%BA%8B%E4%BB%B6/)
+
+最终插件
+``` javascript
+// plugin.js
+;(function(undefined) {
+    "use strict"
+    var _global;
+
+    // 工具函数
+    // 对象合并
+    function extend(o,n,override) {
+        for(var key in n){
+            if(n.hasOwnProperty(key) && (!o.hasOwnProperty(key) || override)){
+                o[key]=n[key];
+            }
+        }
+        return o;
+    }
+    // 自定义模板引擎
+    function templateEngine(html, data) {
+        var re = /<%([^%>]+)?%>/g,
+            reExp = /(^( )?(if|for|else|switch|case|break|{|}))(.*)?/g,
+            code = 'var r=[];\n',
+            cursor = 0;
+        var match;
+        var add = function(line, js) {
+            js ? (code += line.match(reExp) ? line + '\n' : 'r.push(' + line + ');\n') :
+                (code += line != '' ? 'r.push("' + line.replace(/"/g, '\\"') + '");\n' : '');
+            return add;
+        }
+        while (match = re.exec(html)) {
+            add(html.slice(cursor, match.index))(match[1], true);
+            cursor = match.index + match[0].length;
+        }
+        add(html.substr(cursor, html.length - cursor));
+        code += 'return r.join("");';
+        return new Function(code.replace(/[\r\t\n]/g, '')).apply(data);
+    }
+    // 通过class查找dom
+    if(!('getElementsByClass' in HTMLElement)){
+        HTMLElement.prototype.getElementsByClass = function(n){
+            var el = [],
+                _el = this.getElementsByTagName('*');
+            for (var i=0; i<_el.length; i++ ) {
+                if (!!_el[i].className && (typeof _el[i].className == 'string') && _el[i].className.indexOf(n) > -1 ) {
+                    el[el.length] = _el[i];
+                }
+            }
+            return el;
+        };
+        ((typeof HTMLDocument !== 'undefined') ? HTMLDocument : Document).prototype.getElementsByClass = HTMLElement.prototype.getElementsByClass;
+    }
+
+    // 插件构造函数 - 返回数组结构
+    function MyDialog(opt){
+        this._initial(opt);
+    }
+    MyDialog.prototype = {
+        constructor: this,
+        _initial: function(opt) {
+            // 默认参数
+            var def = {
+                ok: true,
+                ok_txt: '确定',
+                cancel: false,
+                cancel_txt: '取消',
+                confirm: function(){},
+                close: function(){},
+                content: '',
+                tmpId: null
+            };
+            this.def = extend(def,opt,true); //配置参数
+            this.tpl = this._parseTpl(this.def.tmpId); //模板字符串
+            this.dom = this._parseToDom(this.tpl)[0]; //存放在实例中的节点
+            this.hasDom = false; //检查dom树中dialog的节点是否存在
+            this.listeners = []; //自定义事件，用于监听插件的用户交互
+            this.handlers = {};
+        },
+        _parseTpl: function(tmpId) { // 将模板转为字符串
+            var data = this.def;
+            var tplStr = document.getElementById(tmpId).innerHTML.trim();
+            return templateEngine(tplStr,data);
+        },
+        _parseToDom: function(str) { // 将字符串转为dom
+            var div = document.createElement('div');
+            if(typeof str == 'string') {
+                div.innerHTML = str;
+            }
+            return div.childNodes;
+        },
+        show: function(callback){
+            var _this = this;
+            if(this.hasDom) return ;
+            if(this.listeners.indexOf('show') > -1) {
+                if(!this.emit({type:'show',target: this.dom})) return ;
+            }
+            document.body.appendChild(this.dom);
+            this.hasDom = true;
+            this.dom.getElementsByClass('close')[0].onclick = function(){
+                _this.hide();
+                if(_this.listeners.indexOf('close') > -1) {
+                    _this.emit({type:'close',target: _this.dom})
+                }
+                !!_this.def.close && _this.def.close.call(this,_this.dom);
+            };
+            this.dom.getElementsByClass('btn-ok')[0].onclick = function(){
+                _this.hide();
+                if(_this.listeners.indexOf('confirm') > -1) {
+                    _this.emit({type:'confirm',target: _this.dom})
+                }
+                !!_this.def.confirm && _this.def.confirm.call(this,_this.dom);
+            };
+            if(this.def.cancel){
+                this.dom.getElementsByClass('btn-cancel')[0].onclick = function(){
+                    _this.hide();
+                    if(_this.listeners.indexOf('cancel') > -1) {
+                        _this.emit({type:'cancel',target: _this.dom})
+                    }
+                };
+            }
+            callback && callback();
+            if(this.listeners.indexOf('shown') > -1) {
+                this.emit({type:'shown',target: this.dom})
+            }
+            return this;
+        },
+        hide: function(callback){
+            if(this.listeners.indexOf('hide') > -1) {
+                if(!this.emit({type:'hide',target: this.dom})) return ;
+            }
+            document.body.removeChild(this.dom);
+            this.hasDom = false;
+            callback && callback();
+            if(this.listeners.indexOf('hidden') > -1) {
+                this.emit({type:'hidden',target: this.dom})
+            }
+            return this;
+        },
+        modifyTpl: function(template){
+            if(!!template) {
+                if(typeof template == 'string'){
+                    this.tpl = template;
+                } else if(typeof template == 'function'){
+                    this.tpl = template();
+                } else {
+                    return this;
+                }
+            }
+            this.dom = this._parseToDom(this.tpl)[0];
+            return this;
+        },
+        css: function(styleObj){
+            for(var prop in styleObj){
+                var attr = prop.replace(/[A-Z]/g,function(word){
+                    return '-' + word.toLowerCase();
+                });
+                this.dom.style[attr] = styleObj[prop];
+            }
+            return this;
+        },
+        width: function(val){
+            this.dom.style.width = val + 'px';
+            return this;
+        },
+        height: function(val){
+            this.dom.style.height = val + 'px';
+            return this;
+        },
+        on: function(type, handler){
+            // type: show, shown, hide, hidden, close, confirm
+            if(typeof this.handlers[type] === 'undefined') {
+                this.handlers[type] = [];
+            }
+            this.listeners.push(type);
+            this.handlers[type].push(handler);
+            return this;
+        },
+        off: function(type, handler){
+            if(this.handlers[type] instanceof Array) {
+                var handlers = this.handlers[type];
+                for(var i = 0, len = handlers.length; i < len; i++) {
+                    if(handlers[i] === handler) {
+                        break;
+                    }
+                }
+                this.listeners.splice(i, 1);
+                handlers.splice(i, 1);
+                return this;
+            }
+        },
+        emit: function(event){
+            if(!event.target) {
+                event.target = this;
+            }
+            if(this.handlers[event.type] instanceof Array) {
+                var handlers = this.handlers[event.type];
+                for(var i = 0, len = handlers.length; i < len; i++) {
+                    handlers[i](event);
+                    return true;
+                }
+            }
+            return false;
+        }
+    }
+
+    // 最后将插件对象暴露给全局对象
+    _global = (function(){ return this || (0, eval)('this'); }());
+    if (typeof module !== "undefined" && module.exports) {
+        module.exports = MyDialog;
+    } else if (typeof define === "function" && define.amd) {
+        define(function(){return MyDialog;});
+    } else {
+        !('MyDialog' in _global) && (_global.MyDialog = MyDialog);
+    }
+}());
+```
+
+调用
+```
+var mydialog = new MyDialog({
+    tmpId: 'dialogTpl',
+    cancel: true,
+    content: 'hello world!'
+});
+mydialog.on('confirm',function(ev){
+    console.log('you click confirm!');
+    // 写你的确定之后的逻辑代码...
+});
+document.getElementById('test').onclick = function(){
+    mydialog.show();
+}
+```
+[案例Demo](https://huangguangjie.github.io/myDialog/)
 
 ###  参考资料
 1. [原生JavaScript插件编写指南](https://link.jianshu.com/?t=http%3A%2F%2Fgeocld.github.io%2F2016%2F03%2F10%2Fjavascript_plugin%2F)
